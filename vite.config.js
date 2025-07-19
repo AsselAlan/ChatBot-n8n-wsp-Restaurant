@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  base: '/chat-web-roles/', // 👈 nombre del repo con slashes
+  base: '/ChatBot-n8n-wsp-Restaurant/', // 👈 tu repo exacto
 });
