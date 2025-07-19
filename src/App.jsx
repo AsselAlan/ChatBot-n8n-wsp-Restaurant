@@ -1,17 +1,112 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
-// ChatBotDemo Component - Versión Mejorada
+// ChatBotDemo Component - Versión con SessionID
 function ChatBotDemo() {
   const [mensajes, setMensajes] = useState([]);
   const [input, setInput] = useState("");
   const [mostrarSugerencias, setMostrarSugerencias] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
 
   // Ref for scrolling to the bottom of the chat window
   const messagesEndRef = useRef(null);
 
   const sugerencias = ["Quiero ver el menú", "Reservar una mesa", "¿Qué me recomendás?"];
+
+  // ==================== SESSION ID MANAGEMENT ====================
+  
+  // Generate a unique session ID
+  const generateSessionId = () => {
+    // Crear un ID único basado en timestamp + random + browser fingerprint
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 9);
+    const browserFingerprint = getBrowserFingerprint();
+    
+    return `chat_${timestamp}_${random}_${browserFingerprint}`;
+  };
+
+  // Get browser fingerprint for more unique session ID
+  const getBrowserFingerprint = () => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.textBaseline = 'top';
+    ctx.font = '14px Arial';
+    ctx.fillText('Browser fingerprint', 2, 2);
+    
+    const fingerprint = [
+      navigator.userAgent,
+      navigator.language,
+      screen.width + 'x' + screen.height,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+      canvas.toDataURL()
+    ].join('|');
+    
+    // Create a simple hash
+    let hash = 0;
+    for (let i = 0; i < fingerprint.length; i++) {
+      const char = fingerprint.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    
+    return Math.abs(hash).toString(36).substr(0, 8);
+  };
+
+  // Initialize or retrieve session ID
+  const initializeSessionId = () => {
+    try {
+      // Try to get existing session ID from localStorage
+      let existingSessionId = localStorage.getItem('chatbot_session_id');
+      
+      // Check if session is still valid (less than 24 hours old)
+      const sessionTimestamp = localStorage.getItem('chatbot_session_timestamp');
+      const now = Date.now();
+      const twentyFourHours = 24 * 60 * 60 * 1000;
+      
+      if (existingSessionId && sessionTimestamp) {
+        const sessionAge = now - parseInt(sessionTimestamp);
+        if (sessionAge < twentyFourHours) {
+          console.log('📱 Recuperando sesión existente:', existingSessionId);
+          return existingSessionId;
+        } else {
+          console.log('⏰ Sesión expirada, creando nueva...');
+        }
+      }
+      
+      // Generate new session ID
+      const newSessionId = generateSessionId();
+      
+      // Save to localStorage
+      localStorage.setItem('chatbot_session_id', newSessionId);
+      localStorage.setItem('chatbot_session_timestamp', now.toString());
+      
+      console.log('🆕 Nueva sesión creada:', newSessionId);
+      return newSessionId;
+      
+    } catch (error) {
+      console.error('Error manejando sessionId:', error);
+      // Fallback to session-only ID
+      return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+  };
+
+  // Clear session (útil para testing o logout)
+  const clearSession = () => {
+    try {
+      localStorage.removeItem('chatbot_session_id');
+      localStorage.removeItem('chatbot_session_timestamp');
+      const newSessionId = initializeSessionId();
+      setSessionId(newSessionId);
+      setMensajes([]);
+      setMostrarSugerencias(true);
+      console.log('🗑️ Sesión limpiada, nueva sesión:', newSessionId);
+    } catch (error) {
+      console.error('Error limpiando sesión:', error);
+    }
+  };
+
+  // ==================== CHAT FUNCTIONALITY ====================
 
   // Function to get the initial for the bot avatar
   const getBotInitial = () => {
@@ -20,6 +115,11 @@ function ChatBotDemo() {
 
   // Function to send a message to the N8N webhook
   const enviarMensaje = async (mensajeTexto) => {
+    if (!sessionId) {
+      console.error('❌ No hay sessionId disponible');
+      return;
+    }
+
     // Add user message to chat
     const userMsg = { tipo: "user", texto: mensajeTexto };
     setMensajes((prev) => [...prev, userMsg]);
@@ -31,10 +131,28 @@ function ChatBotDemo() {
     const webhookUrl = "https://pruebas-n8n.pasruo.easypanel.host/webhook/chatbot-reserver";
 
     try {
+      // Preparar payload con sessionId y metadatos adicionales
+      const payload = {
+        mensaje: mensajeTexto,
+        sessionId: sessionId,
+        timestamp: new Date().toISOString(),
+        userAgent: navigator.userAgent,
+        language: navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        // Metadata útil para el bot
+        metadata: {
+          platform: 'web',
+          source: 'react_frontend',
+          messageCount: mensajes.filter(m => m.tipo === 'user').length + 1
+        }
+      };
+
+      console.log('📤 Enviando mensaje:', payload);
+
       const res = await fetch(webhookUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mensaje: mensajeTexto }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -55,7 +173,7 @@ function ChatBotDemo() {
           rawText = JSON.stringify(data);
         }
 
-        console.log("Raw response text:", rawText);
+        console.log("📥 Respuesta cruda:", rawText);
 
         // Check if the response contains JSON (either wrapped or direct)
         if (rawText.includes('"mensaje"') || rawText.includes('"link"') || rawText.includes('"reserva_guardada"')) {
@@ -65,7 +183,7 @@ function ChatBotDemo() {
             const jsonStr = jsonMatch[1] || jsonMatch[0];
             const parsed = JSON.parse(jsonStr.trim());
             respuesta = parsed;
-            console.log("Parsed JSON response:", respuesta);
+            console.log("✅ Respuesta JSON parseada:", respuesta);
           } else {
             // Try to parse the whole thing as JSON
             respuesta = JSON.parse(rawText);
@@ -89,7 +207,7 @@ function ChatBotDemo() {
         respuesta = { mensaje: fallbackText };
       }
 
-      console.log("Respuesta procesada:", respuesta); // Debug log
+      console.log("🤖 Respuesta procesada:", respuesta);
 
       // Add bot's text message
       if (respuesta.mensaje) {
@@ -207,8 +325,13 @@ function ChatBotDemo() {
     }
   }, [mensajes]);
 
-  // Effect to set initial bot message on component mount
+  // Effect to initialize session ID and set initial bot message
   useEffect(() => {
+    // Initialize session ID first
+    const newSessionId = initializeSessionId();
+    setSessionId(newSessionId);
+
+    // Set initial bot message
     const initialBotMessage = "¡Hola! 👋 Bienvenido a La Buena Mesa. ¿En qué puedo ayudarte hoy?";
     setMensajes([{ 
       tipo: "bot", 
@@ -216,6 +339,8 @@ function ChatBotDemo() {
       timestamp: new Date().toLocaleTimeString()
     }]);
     setMostrarSugerencias(true);
+
+    console.log('🚀 ChatBot inicializado con sessionId:', newSessionId);
   }, []);
 
   return (
@@ -223,6 +348,19 @@ function ChatBotDemo() {
       <div className="chatbot-header">
         <h3>🍽️ La Buena Mesa - Asistente Virtual</h3>
         <small>Reservas • Menú • Información</small>
+        {/* Debug info - Remove in production */}
+        {process.env.NODE_ENV === 'development' && (
+          <div style={{ fontSize: '0.7em', color: '#666', marginTop: '4px' }}>
+            SessionID: {sessionId ? sessionId.substr(-12) : 'Cargando...'}
+            <button 
+              onClick={clearSession} 
+              style={{ marginLeft: '8px', fontSize: '0.7em', padding: '2px 6px' }}
+              className="btn btn-sm btn-outline-secondary"
+            >
+              Nueva Sesión
+            </button>
+          </div>
+        )}
       </div>
       
       <div className="chatbot-window card p-3 mb-3">
@@ -291,7 +429,7 @@ function ChatBotDemo() {
                 key={i}
                 className="btn btn-sm btn-outline-warning suggestion-btn"
                 onClick={() => enviarMensaje(sug)}
-                disabled={isLoading}
+                disabled={isLoading || !sessionId}
               >
                 {sug}
               </button>
@@ -304,16 +442,16 @@ function ChatBotDemo() {
         <input
           type="text"
           className="form-control"
-          placeholder={isLoading ? "Procesando..." : "Escribí un mensaje..."}
+          placeholder={!sessionId ? "Inicializando..." : isLoading ? "Procesando..." : "Escribí un mensaje..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={handleKeyPress}
-          disabled={isLoading}
+          disabled={isLoading || !sessionId}
         />
         <button
           className="btn btn-warning"
           onClick={handleSend}
-          disabled={!input.trim() || isLoading}
+          disabled={!input.trim() || isLoading || !sessionId}
         >
           {isLoading ? (
             <>
@@ -329,7 +467,7 @@ function ChatBotDemo() {
       {/* Status indicator */}
       <div className="chatbot-status">
         <small className="text-muted">
-          Estado: {isLoading ? "🟡 Procesando..." : "🟢 Listo"}
+          Estado: {!sessionId ? "🔄 Inicializando..." : isLoading ? "🟡 Procesando..." : "🟢 Listo"}
         </small>
       </div>
     </div>
@@ -448,7 +586,7 @@ export default function App() {
 //           "name": "OpenAi account"
 //         }
 //       }
-//     },
+//     },a
 //     {
 //       "parameters": {
 //         "resource": "messages-api",
