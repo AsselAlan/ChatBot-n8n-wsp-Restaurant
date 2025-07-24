@@ -14,6 +14,7 @@ El bot responde automáticamente según el contenido del mensaje del cliente. Es
 ### 📋 Casos de uso automatizados:
 
 #### 📌 Consulta de menú
+
 Si el mensaje contiene palabras como `menú`, `carta`, `comida` o `platos`, responde con:
 ```json
 {
@@ -21,6 +22,8 @@ Si el mensaje contiene palabras como `menú`, `carta`, `comida` o `platos`, resp
   "link": "https://alanassell.github.io/RestaurantPage/",
   "linkText": "Ver Menú 📋"
 }
+```
+
 📌 Reserva de mesa
 Detecta palabras como reserva, mesa, agendar y responde:
 
